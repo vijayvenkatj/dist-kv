@@ -2,15 +2,27 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/vijayvenkatj/kv-store/internal/server/wal"
 )
 
+var (
+	DataDoesNotExistErr = errors.New("data does not exist")
+	IllegalOperationErr = errors.New("illegal operation")
+)
+
 type Store struct {
 	mu   sync.RWMutex
 	data map[string]string
+
+	lastAppliedIndex uint32
+	lastSnapIndex    uint32
+	threshold        uint32
+
 	wal  *wal.WAL
+	snap *wal.Snapshot
 }
 
 func New(filePath string) *Store {
@@ -19,18 +31,30 @@ func New(filePath string) *Store {
 		panic(err)
 	}
 
-	return &Store{
-		data: make(map[string]string),
-		wal:  walInstance,
+	snapInstance := wal.NewSnapshot(filePath)
+
+	store := &Store{
+		data:             make(map[string]string),
+		threshold:        5,
+		lastSnapIndex:    0,
+		lastAppliedIndex: 0,
+		wal:              walInstance,
+		snap:             snapInstance,
 	}
+
+	err = store.Restore()
+	if err != nil {
+		panic(err)
+	}
+
+	return store
 }
 
-var (
-	DataDoesNotExistErr = errors.New("data does not exist")
-	IllegalOperationErr = errors.New("illegal operation")
-)
-
 func (s *Store) Apply(entry *wal.LogEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entry.LogIndex = s.lastAppliedIndex + 1
 
 	err := s.wal.Append(entry)
 	if err != nil {
@@ -39,19 +63,41 @@ func (s *Store) Apply(entry *wal.LogEntry) error {
 
 	switch entry.Operation {
 	case "put":
-		s.mu.Lock()
-		defer s.mu.Unlock()
-
 		s.data[entry.Key] = entry.Value
 		break
 	case "delete":
-		s.mu.Lock()
-		defer s.mu.Unlock()
-
 		delete(s.data, entry.Key)
 		break
 	default:
 		return IllegalOperationErr
+	}
+
+	s.lastAppliedIndex++
+
+	if s.lastAppliedIndex-s.lastSnapIndex >= s.threshold {
+
+		// Copy the data
+		oldData := make(map[string]string)
+		for k, v := range s.data {
+			oldData[k] = v
+		}
+		lastIndex := s.lastAppliedIndex
+
+		// Snapshot
+		err = s.snap.Save(oldData, lastIndex)
+		if err != nil {
+			fmt.Println("Error writing snapshot:", err)
+			return err
+		}
+
+		// Truncate WAL
+		err = s.wal.Reset()
+		if err != nil {
+			fmt.Println("Error resetting wal:", err)
+		}
+		s.lastSnapIndex = lastIndex
+
+		return nil
 	}
 
 	return nil
@@ -86,17 +132,28 @@ func (s *Store) Get(key string) (string, error) {
 
 func (s *Store) Restore() error {
 
+	snapData, err := s.snap.Read()
+	if err != nil {
+		return err
+	}
+	s.data = snapData.Data
+
 	entries, err := s.wal.ReadAll()
 	if err != nil {
 		return err
 	}
 
 	for _, entry := range entries {
+		if entry.LogIndex <= snapData.LastIndex {
+			continue
+		}
 		err := s.applyToMemory(entry)
 		if err != nil {
 			return err
 		}
+		s.lastAppliedIndex = entry.LogIndex
 	}
+
 	return nil
 }
 

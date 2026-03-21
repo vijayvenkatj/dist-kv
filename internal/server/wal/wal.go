@@ -2,13 +2,16 @@ package wal
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
 type LogEntry struct {
+	LogIndex  uint32
 	Operation string
 	Key       string
 	Value     string
@@ -21,7 +24,13 @@ type WAL struct {
 
 func NewWAL(filePath string) (*WAL, error) {
 
-	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
+	err := os.MkdirAll(filePath, 0755)
+	if err != nil {
+		return nil, err
+	}
+
+	fileName := filepath.Join(filePath, "wal.log")
+	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
 	if err != nil {
 		return nil, err
 	}
@@ -67,19 +76,19 @@ func (wal *WAL) ReadAll() ([]*LogEntry, error) {
 	entries := make([]*LogEntry, 0)
 
 	for {
-		header := make([]byte, 12)
+		header := make([]byte, 16)
 
 		_, err := io.ReadFull(wal.file, header)
 		if err == io.EOF {
 			break
 		}
-		if err != nil {
+		if errors.Is(err, io.ErrUnexpectedEOF) {
 			break
 		}
 
-		opLen := binary.LittleEndian.Uint32(header[0:4])
-		keyLen := binary.LittleEndian.Uint32(header[4:8])
-		valLen := binary.LittleEndian.Uint32(header[8:12])
+		opLen := binary.LittleEndian.Uint32(header[4:8])
+		keyLen := binary.LittleEndian.Uint32(header[8:12])
+		valLen := binary.LittleEndian.Uint32(header[12:16])
 
 		totalBody := int(opLen + keyLen + valLen)
 
@@ -91,21 +100,51 @@ func (wal *WAL) ReadAll() ([]*LogEntry, error) {
 			break
 		}
 
-		data := make([]byte, 12+totalBody)
-		copy(data[:12], header)
-		copy(data[12:], body)
+		data := make([]byte, 16+totalBody)
+		copy(data[:16], header)
+		copy(data[16:], body)
 
 		entry, err := decode(data)
-		if err != nil {
-			return nil, err
-		}
 
 		entries = append(entries, entry)
+	}
+
+	_, err := wal.file.Seek(0, io.SeekEnd)
+	if err != nil {
+		return nil, err
 	}
 
 	return entries, nil
 }
 
+/*
+	HELPER FUNCTIONS
+*/
+
+// Name returns the file name of the wal.
+func (wal *WAL) Name() string {
+	return wal.file.Name()
+}
+
+// Reset truncates the wal file
+func (wal *WAL) Reset() error {
+	wal.mu.Lock()
+	defer wal.mu.Unlock()
+
+	if err := wal.file.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := wal.file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if err := wal.file.Sync(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Close closes the wal file.
 func (wal *WAL) Close() error {
 	wal.mu.Lock()
 	defer wal.mu.Unlock()

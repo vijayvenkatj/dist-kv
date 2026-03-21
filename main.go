@@ -9,7 +9,7 @@ import (
 
 func main() {
 
-	storeInstance := store.New("tmp/wal.log")
+	storeInstance := store.New("tmp")
 
 	for {
 		var operation string
