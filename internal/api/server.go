@@ -12,15 +12,22 @@ type Server struct {
 	HttpServer *http.Server
 }
 
-func NewServer(addr, path string) *Server {
+type Config struct {
+	Address string
+	NodeId  string
+	Peers   []string
+	Path    string
+}
 
-	storeInstance := store.New(path)
-	handler := NewHandler(storeInstance)
+func NewServer(config Config) *Server {
+
+	storeInstance := store.New(config.Path)
+	handler := NewHandler(storeInstance, config)
 	router := NewRouter(handler)
 
 	return &Server{
 		HttpServer: &http.Server{
-			Addr:    addr,
+			Addr:    config.Address,
 			Handler: corsMiddleware(router),
 		},
 	}

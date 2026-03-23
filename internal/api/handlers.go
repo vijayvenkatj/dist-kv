@@ -9,11 +9,17 @@ import (
 )
 
 type Handler struct {
-	Store *store.Store
+	NodeID string
+	Peers  []string
+	Store  *store.Store
 }
 
-func NewHandler(store *store.Store) *Handler {
-	return &Handler{store}
+func NewHandler(store *store.Store, config Config) *Handler {
+	return &Handler{
+		NodeID: config.NodeId,
+		Peers:  config.Peers,
+		Store:  store,
+	}
 }
 
 func (handler *Handler) GetValueHandler(w http.ResponseWriter, r *http.Request) {
