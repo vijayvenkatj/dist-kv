@@ -9,6 +9,7 @@ func NewRouter(handler *Handler) *http.ServeMux {
 	router := http.NewServeMux()
 
 	router.Handle("/api/v1/", http.StripPrefix("/api/v1", RouterV1(handler)))
+	router.HandleFunc("POST /internal/replicate", handler.ReplicateHandler)
 
 	return router
 }

@@ -6,19 +6,21 @@ import (
 )
 
 func encode(e *LogEntry) []byte {
+
 	op := []byte(e.Operation)
 	key := []byte(e.Key)
 	val := []byte(e.Value)
 
-	total := 16 + len(op) + len(key) + len(val)
+	total := 20 + len(op) + len(key) + len(val)
 	buf := make([]byte, total)
 
-	binary.LittleEndian.PutUint32(buf[0:4], e.LogIndex)
-	binary.LittleEndian.PutUint32(buf[4:8], uint32(len(op)))
-	binary.LittleEndian.PutUint32(buf[8:12], uint32(len(key)))
-	binary.LittleEndian.PutUint32(buf[12:16], uint32(len(val)))
+	binary.LittleEndian.PutUint32(buf[0:4], e.Term)
+	binary.LittleEndian.PutUint32(buf[4:8], e.LogIndex)
+	binary.LittleEndian.PutUint32(buf[8:12], uint32(len(op)))
+	binary.LittleEndian.PutUint32(buf[12:16], uint32(len(key)))
+	binary.LittleEndian.PutUint32(buf[16:20], uint32(len(val)))
 
-	offset := 16
+	offset := 20
 	copy(buf[offset:], op)
 	offset += len(op)
 
@@ -31,11 +33,14 @@ func encode(e *LogEntry) []byte {
 }
 
 func decode(data []byte) (*LogEntry, error) {
-	if len(data) < 16 {
+	if len(data) < 20 {
 		return nil, fmt.Errorf("invalid header")
 	}
 
 	offset := 0
+
+	term := binary.LittleEndian.Uint32(data[offset:])
+	offset += 4
 
 	idx := binary.LittleEndian.Uint32(data[offset:])
 	offset += 4
@@ -50,7 +55,7 @@ func decode(data []byte) (*LogEntry, error) {
 	offset += 4
 
 	total := int(opLen + keyLen + valLen)
-	if len(data) < 16+total {
+	if len(data) < 20+total {
 		return nil, fmt.Errorf("incomplete entry")
 	}
 
@@ -63,6 +68,7 @@ func decode(data []byte) (*LogEntry, error) {
 	value := string(data[offset : offset+int(valLen)])
 
 	return &LogEntry{
+		Term:      term,
 		LogIndex:  idx,
 		Operation: op,
 		Key:       key,

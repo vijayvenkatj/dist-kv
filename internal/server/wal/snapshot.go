@@ -10,12 +10,14 @@ import (
 
 type SnapshotData struct {
 	Data      map[string]string
-	LastIndex uint32
+	SnapIndex uint32
 }
 
 type Snapshot struct {
-	mu   sync.Mutex
-	Path string
+	mu sync.Mutex
+
+	Path      string
+	SnapIndex uint32
 }
 
 func NewSnapshot(path string) *Snapshot {
@@ -24,7 +26,7 @@ func NewSnapshot(path string) *Snapshot {
 		fmt.Println(err)
 		return nil
 	}
-	return &Snapshot{Path: path}
+	return &Snapshot{Path: path, SnapIndex: 0}
 }
 
 func (snapshot *Snapshot) Save(data map[string]string, lastIndex uint32) error {
@@ -46,7 +48,7 @@ func (snapshot *Snapshot) Save(data map[string]string, lastIndex uint32) error {
 
 	snapShot := SnapshotData{
 		Data:      data,
-		LastIndex: lastIndex,
+		SnapIndex: lastIndex,
 	}
 	if err := encoder.Encode(snapShot); err != nil {
 		_ = file.Close()
@@ -89,7 +91,7 @@ func (snapshot *Snapshot) Read() (*SnapshotData, error) {
 		if os.IsNotExist(err) {
 			return &SnapshotData{
 				Data:      make(map[string]string),
-				LastIndex: 0,
+				SnapIndex: 0,
 			}, nil
 		}
 		return nil, err

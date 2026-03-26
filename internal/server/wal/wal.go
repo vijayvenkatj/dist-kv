@@ -11,6 +11,7 @@ import (
 )
 
 type LogEntry struct {
+	Term      uint32
 	LogIndex  uint32
 	Operation string
 	Key       string
@@ -20,6 +21,10 @@ type LogEntry struct {
 type WAL struct {
 	mu   sync.Mutex
 	file *os.File
+
+	LastIndex   uint32
+	CurrentTerm uint32
+	Entries     []*LogEntry
 }
 
 func NewWAL(filePath string) (*WAL, error) {
@@ -58,6 +63,9 @@ func (wal *WAL) Append(entry *LogEntry) error {
 		return err
 	}
 
+	wal.Entries = append(wal.Entries, entry)
+	wal.LastIndex = entry.LogIndex
+
 	return nil
 }
 
@@ -76,7 +84,7 @@ func (wal *WAL) ReadAll() ([]*LogEntry, error) {
 	entries := make([]*LogEntry, 0)
 
 	for {
-		header := make([]byte, 16)
+		header := make([]byte, 20)
 
 		_, err := io.ReadFull(wal.file, header)
 		if err == io.EOF {
@@ -86,9 +94,9 @@ func (wal *WAL) ReadAll() ([]*LogEntry, error) {
 			break
 		}
 
-		opLen := binary.LittleEndian.Uint32(header[4:8])
-		keyLen := binary.LittleEndian.Uint32(header[8:12])
-		valLen := binary.LittleEndian.Uint32(header[12:16])
+		opLen := binary.LittleEndian.Uint32(header[8:12])
+		keyLen := binary.LittleEndian.Uint32(header[12:16])
+		valLen := binary.LittleEndian.Uint32(header[16:20])
 
 		totalBody := int(opLen + keyLen + valLen)
 
@@ -100,9 +108,9 @@ func (wal *WAL) ReadAll() ([]*LogEntry, error) {
 			break
 		}
 
-		data := make([]byte, 16+totalBody)
-		copy(data[:16], header)
-		copy(data[16:], body)
+		data := make([]byte, 20+totalBody)
+		copy(data[:20], header)
+		copy(data[20:], body)
 
 		entry, err := decode(data)
 
@@ -114,7 +122,75 @@ func (wal *WAL) ReadAll() ([]*LogEntry, error) {
 		return nil, err
 	}
 
+	wal.Entries = entries
+
 	return entries, nil
+}
+
+func (wal *WAL) Get(index uint32) (*LogEntry, error) {
+	wal.mu.Lock()
+	defer wal.mu.Unlock()
+	if index == 0 || int(index) > len(wal.Entries) {
+		return nil, errors.New("out of bounds")
+	}
+
+	return wal.Entries[index-1], nil
+}
+
+func (wal *WAL) ReadSince(index uint32) ([]*LogEntry, error) {
+	wal.mu.Lock()
+	defer wal.mu.Unlock()
+	if index == 0 {
+		return nil, errors.New("out of bounds")
+	}
+	if int(index) > len(wal.Entries) {
+		return []*LogEntry{}, nil
+	}
+
+	return wal.Entries[index-1:], nil
+}
+
+func (wal *WAL) ReadRange(start, end uint32) ([]*LogEntry, error) {
+	wal.mu.Lock()
+	defer wal.mu.Unlock()
+	if start == 0 || end == 0 || int(start) > len(wal.Entries) || int(end) > len(wal.Entries) || start > end {
+		return nil, errors.New("out of bounds")
+	}
+
+	return wal.Entries[start-1 : end], nil
+}
+
+func (wal *WAL) TruncateFrom(start uint32) error {
+	if start == 0 || int(start) > len(wal.Entries)+1 {
+		return errors.New("out of bounds")
+	}
+
+	wal.mu.Lock()
+	defer wal.mu.Unlock()
+
+	wal.Entries = wal.Entries[:start-1]
+	wal.LastIndex = start - 1
+
+	if err := wal.file.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := wal.file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
+	for _, entry := range wal.Entries {
+		data := encode(entry)
+
+		n, err := wal.file.Write(data)
+		if err != nil {
+			return err
+		}
+		if n != len(data) {
+			return io.ErrShortWrite
+		}
+	}
+
+	return wal.file.Sync()
 }
 
 /*

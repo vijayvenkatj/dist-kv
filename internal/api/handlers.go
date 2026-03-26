@@ -9,15 +9,15 @@ import (
 )
 
 type Handler struct {
-	NodeID   string
-	Peers    []string
+	NodeID   uint32
+	Peers    []uint32
 	IsLeader bool
 	Store    *store.Store
 }
 
 func NewHandler(store *store.Store, config Config) *Handler {
 	return &Handler{
-		NodeID:   config.NodeId,
+		NodeID:   config.NodeID,
 		Peers:    config.Peers,
 		Store:    store,
 		IsLeader: config.IsLeader,
@@ -97,4 +97,15 @@ func (handler *Handler) DeleteValueHandler(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, Response{
 		Data: "deleted",
 	})
+}
+
+func (handler *Handler) ReplicateHandler(w http.ResponseWriter, r *http.Request) {
+	var request store.AppendEntriesRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeJSON(w, http.StatusBadRequest, store.AppendEntriesResponse{Success: false})
+		return
+	}
+
+	resp := handler.Store.AppendEntries(request)
+	writeJSON(w, http.StatusOK, resp)
 }

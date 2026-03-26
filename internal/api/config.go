@@ -9,6 +9,3 @@ type putRequest struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
 }
-type deleteRequest struct {
-	Key string `json:"key"`
-}

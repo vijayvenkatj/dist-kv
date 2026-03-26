@@ -2,11 +2,21 @@ package store
 
 import (
 	"errors"
-	"fmt"
+	"log"
+	"net/http"
 	"sync"
+	"time"
 
 	"github.com/vijayvenkatj/kv-store/internal/server/wal"
 )
+
+type Config struct {
+	NodeID   uint32
+	Peers    []uint32
+	PeerMap  map[uint32]string
+	IsLeader bool
+	Path     string
+}
 
 var (
 	DataDoesNotExistErr = errors.New("data does not exist")
@@ -17,116 +27,126 @@ type Store struct {
 	mu   sync.RWMutex
 	data map[string]string
 
-	lastAppliedIndex uint32
-	commitIndex      uint32
+	cond *sync.Cond
 
-	lastSnapIndex uint32
-	threshold     uint32
+	LeaderID    uint32
+	CurrentTerm uint32
 
-	peers    []string
-	isLeader bool
+	LastApplied uint32
+	CommitIndex uint32
+
+	followers   []uint32
+	followerMap map[uint32]string
+	isLeader    bool
+
+	NextIndex  map[uint32]uint32
+	MatchIndex map[uint32]uint32
 
 	wal  *wal.WAL
 	snap *wal.Snapshot
+
+	httpClient *http.Client
 }
 
-func New(filePath string, peers []string, isLeader bool) *Store {
-	walInstance, err := wal.NewWAL(filePath)
+func New(config Config) *Store {
+	walInstance, err := wal.NewWAL(config.Path)
 	if err != nil {
 		panic(err)
 	}
 
-	snapInstance := wal.NewSnapshot(filePath)
+	snapInstance := wal.NewSnapshot(config.Path)
+	var httpClient = &http.Client{
+		Timeout: 2 * time.Second,
+	}
 
 	store := &Store{
-		data:             make(map[string]string),
-		threshold:        5,
-		lastSnapIndex:    0,
-		lastAppliedIndex: 0,
-		wal:              walInstance,
-		snap:             snapInstance,
+		data: make(map[string]string),
 
-		isLeader: isLeader,
-		peers:    peers,
+		LeaderID: config.NodeID,
+
+		LastApplied: 0,
+		CommitIndex: 0,
+
+		followers:   config.Peers,
+		followerMap: make(map[uint32]string),
+		isLeader:    config.IsLeader,
+
+		NextIndex:  make(map[uint32]uint32),
+		MatchIndex: make(map[uint32]uint32),
+
+		wal:  walInstance,
+		snap: snapInstance,
+
+		httpClient: httpClient,
 	}
+
+	store.cond = sync.NewCond(&store.mu)
+	store.followerMap = config.PeerMap
 
 	err = store.Restore()
 	if err != nil {
 		panic(err)
 	}
 
+	lastLog := store.wal.LastIndex
+	for _, follower := range store.followers {
+		store.NextIndex[follower] = lastLog + 1
+		if store.isLeader {
+			go store.replicateWorker(follower)
+		}
+	}
+
+	go store.ApplyLoop()
+
 	return store
 }
 
 func (s *Store) Apply(entry *wal.LogEntry) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
-	entry.LogIndex = s.lastAppliedIndex + 1
+	if !s.isLeader {
+		s.mu.Unlock()
+		return errors.New("not leader")
+	}
+
+	entry.LogIndex = s.wal.LastIndex + 1
+	entry.Term = s.CurrentTerm
 
 	err := s.wal.Append(entry)
 	if err != nil {
+		s.mu.Unlock()
 		return err
 	}
 
-	// Send to Peers and check for ACKs
+	index := entry.LogIndex
 
-	// If majority achieved -> go ahead
-
-	switch entry.Operation {
-	case "put":
-		s.data[entry.Key] = entry.Value
-		break
-	case "delete":
-		delete(s.data, entry.Key)
-		break
-	default:
-		return IllegalOperationErr
+	if len(s.followers) == 0 {
+		s.CommitIndex = index
+		s.cond.Broadcast()
 	}
 
-	s.lastAppliedIndex++
+	s.mu.Unlock()
 
-	if s.lastAppliedIndex-s.lastSnapIndex >= s.threshold {
-
-		// Copy the data
-		oldData := make(map[string]string)
-		for k, v := range s.data {
-			oldData[k] = v
-		}
-		lastIndex := s.lastAppliedIndex
-
-		// Snapshot
-		err = s.snap.Save(oldData, lastIndex)
-		if err != nil {
-			fmt.Println("Error writing snapshot:", err)
-			return err
-		}
-
-		// Truncate WAL
-		err = s.wal.Reset()
-		if err != nil {
-			fmt.Println("Error resetting wal:", err)
-		}
-		s.lastSnapIndex = lastIndex
-
-		return nil
-	}
-
-	return nil
+	return s.waitForCommit(index)
 }
 
-func (s *Store) applyToMemory(entry *wal.LogEntry) error {
+func (s *Store) waitForCommit(index uint32) error {
+	deadline := time.Now().Add(2 * time.Second)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	switch entry.Operation {
-	case "put":
-		s.data[entry.Key] = entry.Value
-	case "delete":
-		delete(s.data, entry.Key)
-	default:
-		return IllegalOperationErr
+	log.Printf("Waiting for index: %d, current: %d", index, s.CommitIndex)
+
+	for s.CommitIndex < index {
+		if time.Now().After(deadline) {
+			log.Printf("Timeout waiting for commit index: %d, current: %d", index, s.CommitIndex)
+			return errors.New("timeout")
+		}
+		s.cond.Wait()
 	}
+
+	log.Printf("Commit index: %d, current: %d", index, s.CommitIndex)
 
 	return nil
 }
@@ -144,27 +164,21 @@ func (s *Store) Get(key string) (string, error) {
 
 func (s *Store) Restore() error {
 
-	snapData, err := s.snap.Read()
-	if err != nil {
-		return err
-	}
-	s.data = snapData.Data
-
 	entries, err := s.wal.ReadAll()
 	if err != nil {
 		return err
 	}
 
 	for _, entry := range entries {
-		if entry.LogIndex <= snapData.LastIndex {
-			continue
-		}
 		err := s.applyToMemory(entry)
 		if err != nil {
 			return err
 		}
-		s.lastAppliedIndex = entry.LogIndex
+		s.LastApplied = entry.LogIndex
 	}
+
+	s.wal.LastIndex = s.LastApplied
+	s.CommitIndex = s.LastApplied
 
 	return nil
 }

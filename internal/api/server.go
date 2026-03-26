@@ -14,15 +14,26 @@ type Server struct {
 
 type Config struct {
 	Address  string
-	NodeId   string
 	IsLeader bool
-	Peers    []string
-	Path     string
+
+	NodeID  uint32
+	Peers   []uint32
+	PeerMap map[uint32]string
+
+	Path string
 }
 
 func NewServer(config Config) *Server {
 
-	storeInstance := store.New(config.Path, config.Peers, config.IsLeader)
+	storeConfig := store.Config{
+		NodeID:   config.NodeID,
+		Peers:    config.Peers,
+		PeerMap:  config.PeerMap,
+		IsLeader: config.IsLeader,
+		Path:     config.Path,
+	}
+
+	storeInstance := store.New(storeConfig)
 	handler := NewHandler(storeInstance, config)
 	router := NewRouter(handler)
 
@@ -34,8 +45,10 @@ func NewServer(config Config) *Server {
 	}
 }
 
-func (server *Server) ListenAndServe() {
+func (server *Server) ListenAndServe() error {
 	if err := server.HttpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("listen: %s\n", err)
+		return err
 	}
+	return nil
 }
