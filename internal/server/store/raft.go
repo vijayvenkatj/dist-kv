@@ -1,6 +1,7 @@
 package store
 
 import (
+	"log"
 	"math/rand"
 	"time"
 
@@ -28,7 +29,10 @@ func (s *Store) AppendEntries(req AppendEntriesRequest) AppendEntriesResponse {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.resetCh <- struct{}{}
+	select {
+	case s.resetCh <- struct{}{}:
+	default:
+	}
 
 	// Term check
 	if req.Term < s.CurrentTerm {
@@ -75,7 +79,7 @@ func (s *Store) AppendEntries(req AppendEntriesRequest) AppendEntriesResponse {
 	return AppendEntriesResponse{Success: true, Term: s.CurrentTerm}
 }
 
-func (s *Store) Election() {
+func (s *Store) startElection() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -84,6 +88,8 @@ func (s *Store) Election() {
 	// Vote for itself
 	s.VotedFor = s.NodeID
 	votes := 1
+
+	log.Println(votes)
 
 	// RPC to other nodes to get the majority
 
@@ -99,7 +105,7 @@ func (s *Store) runElectionTimer() {
 		select {
 		case <-timer.C:
 			// Start the election
-			// ------
+			s.startElection()
 			timer.Reset(s.randomTimeout())
 
 		case <-s.resetCh:

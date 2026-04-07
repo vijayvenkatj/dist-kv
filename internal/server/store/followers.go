@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
 	"time"
 
@@ -67,7 +68,7 @@ func (s *Store) replicateWorker(follower uint32) {
 		if err != nil {
 			s.mu.Unlock()
 			time.Sleep(backoff)
-			backoff = min(backoff*2, time.Second)
+			backoff = min(backoff*2, 3*time.Second) + time.Duration(rand.Intn(150))*time.Millisecond
 			continue
 		}
 
@@ -89,11 +90,14 @@ func (s *Store) replicateWorker(follower uint32) {
 
 		if s.NextIndex[follower] > 1 {
 			s.NextIndex[follower]--
+			s.mu.Unlock()
+			continue
 		}
 
 		s.mu.Unlock()
+
 		time.Sleep(backoff)
-		backoff = min(backoff*2, time.Second)
+		backoff = min(backoff*2, time.Second) + time.Duration(rand.Intn(150))*time.Millisecond
 	}
 }
 

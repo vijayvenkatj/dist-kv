@@ -119,6 +119,10 @@ func New(config Config) *Store {
 		}
 	}
 
+	if store.state == Follower {
+		go store.runElectionTimer()
+	}
+
 	go store.ApplyLoop()
 
 	return store
