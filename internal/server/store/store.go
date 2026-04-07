@@ -23,6 +23,14 @@ var (
 	IllegalOperationErr = errors.New("illegal operation")
 )
 
+type InstanceType int
+
+const (
+	Follower  InstanceType = iota
+	Leader                 = 1
+	Candidate              = 2
+)
+
 type Store struct {
 	mu   sync.RWMutex
 	data map[string]string
@@ -32,12 +40,14 @@ type Store struct {
 	LeaderID    uint32
 	CurrentTerm uint32
 
+	ElectionT time.Duration
+
 	LastApplied uint32
 	CommitIndex uint32
 
 	followers   []uint32
 	followerMap map[uint32]string
-	isLeader    bool
+	state       InstanceType
 
 	NextIndex  map[uint32]uint32
 	MatchIndex map[uint32]uint32
@@ -59,6 +69,13 @@ func New(config Config) *Store {
 		Timeout: 2 * time.Second,
 	}
 
+	var state InstanceType
+	if config.IsLeader {
+		state = Leader
+	} else {
+		state = Follower
+	}
+
 	store := &Store{
 		data: make(map[string]string),
 
@@ -69,7 +86,7 @@ func New(config Config) *Store {
 
 		followers:   config.Peers,
 		followerMap: make(map[uint32]string),
-		isLeader:    config.IsLeader,
+		state:       state,
 
 		NextIndex:  make(map[uint32]uint32),
 		MatchIndex: make(map[uint32]uint32),
@@ -91,7 +108,7 @@ func New(config Config) *Store {
 	lastLog := store.wal.LastIndex
 	for _, follower := range store.followers {
 		store.NextIndex[follower] = lastLog + 1
-		if store.isLeader {
+		if store.state == Leader {
 			go store.replicateWorker(follower)
 		}
 	}
@@ -104,7 +121,7 @@ func New(config Config) *Store {
 func (s *Store) Apply(entry *wal.LogEntry) error {
 	s.mu.Lock()
 
-	if !s.isLeader {
+	if !(s.state == Leader) {
 		s.mu.Unlock()
 		return errors.New("not leader")
 	}

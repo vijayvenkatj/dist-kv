@@ -30,7 +30,10 @@ func (s *Store) AppendEntries(req AppendEntriesRequest) AppendEntriesResponse {
 		return AppendEntriesResponse{Success: false}
 	}
 
-	s.CurrentTerm = req.Term
+	if s.CurrentTerm < req.Term {
+		s.isLeader = false
+		s.CurrentTerm = req.Term
+	}
 
 	// Check prev log
 	if req.PrevLogIndex > 0 {

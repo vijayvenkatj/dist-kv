@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -19,7 +20,7 @@ func (s *Store) replicateWorker(follower uint32) {
 
 	for {
 		s.mu.RLock()
-		if !s.isLeader {
+		if !(s.state == Leader) {
 			s.mu.RUnlock()
 			return
 		}
@@ -45,17 +46,20 @@ func (s *Store) replicateWorker(follower uint32) {
 		s.mu.RUnlock()
 
 		term, success, err := s.sendReplication(entries, commitIdx, follower, prevLogIdx, prevLogTerm)
+		if success == false || err != nil {
+			log.Printf("replicateWorker failed for follower %d: %v", follower, err)
+		}
 
 		s.mu.Lock()
 
-		if !s.isLeader {
+		if !(s.state == Leader) {
 			s.mu.Unlock()
 			return
 		}
 
 		if term > s.CurrentTerm {
 			s.CurrentTerm = term
-			s.isLeader = false
+			s.state = Follower
 			s.mu.Unlock()
 			return
 		}
