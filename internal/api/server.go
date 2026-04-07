@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/vijayvenkatj/kv-store/internal/server/store"
 )
@@ -13,8 +14,9 @@ type Server struct {
 }
 
 type Config struct {
-	Address  string
-	IsLeader bool
+	Address   string
+	IsLeader  bool
+	ElectionT time.Duration
 
 	NodeID  uint32
 	Peers   []uint32
@@ -26,11 +28,12 @@ type Config struct {
 func NewServer(config Config) *Server {
 
 	storeConfig := store.Config{
-		NodeID:   config.NodeID,
-		Peers:    config.Peers,
-		PeerMap:  config.PeerMap,
-		IsLeader: config.IsLeader,
-		Path:     config.Path,
+		NodeID:    config.NodeID,
+		ElectionT: config.ElectionT,
+		Peers:     config.Peers,
+		PeerMap:   config.PeerMap,
+		IsLeader:  config.IsLeader,
+		Path:      config.Path,
 	}
 
 	storeInstance := store.New(storeConfig)

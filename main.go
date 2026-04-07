@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/vijayvenkatj/kv-store/internal/api"
 )
@@ -54,13 +55,13 @@ func main() {
 
 	// Build config
 	config := api.Config{
-		NodeID:   uint32(*nodeID),
-		IsLeader: *isLeader, // only for local testing
-		Address:  fmt.Sprintf(":%s", *port),
-		Path:     fmt.Sprintf("%s/node-%d", *path, *nodeID),
-
-		Peers:   peers,
-		PeerMap: peerMap,
+		NodeID:    uint32(*nodeID),
+		IsLeader:  *isLeader, // only for local testing
+		Address:   fmt.Sprintf(":%s", *port),
+		Path:      fmt.Sprintf("%s/node-%d", *path, *nodeID),
+		ElectionT: 5 * time.Second,
+		Peers:     peers,
+		PeerMap:   peerMap,
 	}
 
 	// Start server

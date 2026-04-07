@@ -1,6 +1,9 @@
 package store
 
 import (
+	"math/rand"
+	"time"
+
 	"github.com/vijayvenkatj/kv-store/internal/server/wal"
 )
 
@@ -25,13 +28,14 @@ func (s *Store) AppendEntries(req AppendEntriesRequest) AppendEntriesResponse {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.resetCh <- struct{}{}
+
 	// Term check
 	if req.Term < s.CurrentTerm {
 		return AppendEntriesResponse{Success: false}
 	}
-
 	if s.CurrentTerm < req.Term {
-		s.isLeader = false
+		s.state = Follower
 		s.CurrentTerm = req.Term
 	}
 
@@ -69,4 +73,34 @@ func (s *Store) AppendEntries(req AppendEntriesRequest) AppendEntriesResponse {
 	}
 
 	return AppendEntriesResponse{Success: true, Term: s.CurrentTerm}
+}
+
+/*
+ */
+func (s *Store) runElectionTimer() {
+	timer := time.NewTimer(s.randomTimeout())
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-timer.C:
+			// Start the election
+			// ------
+			timeout := s.randomTimeout()
+			timer.Reset(timeout)
+
+		case <-s.resetCh:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(s.randomTimeout())
+		}
+	}
+}
+
+func (s *Store) randomTimeout() time.Duration {
+	return s.ElectionT + time.Duration(rand.Intn(150))*time.Millisecond
 }

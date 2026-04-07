@@ -11,11 +11,12 @@ import (
 )
 
 type Config struct {
-	NodeID   uint32
-	Peers    []uint32
-	PeerMap  map[uint32]string
-	IsLeader bool
-	Path     string
+	NodeID    uint32
+	Peers     []uint32
+	PeerMap   map[uint32]string
+	IsLeader  bool
+	Path      string
+	ElectionT time.Duration
 }
 
 var (
@@ -41,6 +42,7 @@ type Store struct {
 	CurrentTerm uint32
 
 	ElectionT time.Duration
+	resetCh   chan struct{}
 
 	LastApplied uint32
 	CommitIndex uint32
@@ -79,7 +81,9 @@ func New(config Config) *Store {
 	store := &Store{
 		data: make(map[string]string),
 
-		LeaderID: config.NodeID,
+		LeaderID:  config.NodeID,
+		ElectionT: config.ElectionT,
+		resetCh:   make(chan struct{}),
 
 		LastApplied: 0,
 		CommitIndex: 0,
