@@ -103,7 +103,7 @@ sendReplication sends a HTTP request for AppendEntries RPC to the specified foll
 func (s *Store) sendReplication(logs []*wal.LogEntry, leaderCommit, follower, prevLogIdx, prevLogTerm uint32) (uint32, bool, error) {
 
 	reqBody := AppendEntriesRequest{
-		LeaderId:     s.LeaderID,
+		LeaderId:     s.NodeID,
 		Term:         s.CurrentTerm,
 		PrevLogIndex: prevLogIdx,
 		PrevLogTerm:  prevLogTerm,

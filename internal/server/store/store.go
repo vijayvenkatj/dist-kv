@@ -38,8 +38,10 @@ type Store struct {
 
 	cond *sync.Cond
 
-	LeaderID    uint32
+	// LeaderId		uint32 -> TODO: add in the future
+	NodeID      uint32
 	CurrentTerm uint32
+	VotedFor    uint32
 
 	ElectionT time.Duration
 	resetCh   chan struct{}
@@ -81,7 +83,7 @@ func New(config Config) *Store {
 	store := &Store{
 		data: make(map[string]string),
 
-		LeaderID:  config.NodeID,
+		NodeID:    config.NodeID,
 		ElectionT: config.ElectionT,
 		resetCh:   make(chan struct{}),
 

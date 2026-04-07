@@ -75,8 +75,22 @@ func (s *Store) AppendEntries(req AppendEntriesRequest) AppendEntriesResponse {
 	return AppendEntriesResponse{Success: true, Term: s.CurrentTerm}
 }
 
-/*
- */
+func (s *Store) Election() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.CurrentTerm++
+
+	// Vote for itself
+	s.VotedFor = s.NodeID
+	votes := 1
+
+	// RPC to other nodes to get the majority
+
+	// reset timer if its right.
+
+}
+
 func (s *Store) runElectionTimer() {
 	timer := time.NewTimer(s.randomTimeout())
 	defer timer.Stop()
@@ -86,8 +100,7 @@ func (s *Store) runElectionTimer() {
 		case <-timer.C:
 			// Start the election
 			// ------
-			timeout := s.randomTimeout()
-			timer.Reset(timeout)
+			timer.Reset(s.randomTimeout())
 
 		case <-s.resetCh:
 			if !timer.Stop() {
