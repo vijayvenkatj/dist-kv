@@ -47,14 +47,14 @@ At its core, this system leverages the **Raft consensus algorithm** to guarantee
 Start the first node:
 
 ```bash
-go run main.go -id 1 -port 8080 -path ./tmp
+go run main.go -id 1 -port 8080 -path ./tmp -shardMap "0=1@localhost:8080,2@localhost:8081,3@localhost:8082"
 ```
 
-Start additional nodes and specify the peers:
+Start additional nodes with the same `-shardMap`:
 
 ```bash
-go run main.go -id 2 -port 8081 -path ./tmp -peers "1=localhost:8080"
-go run main.go -id 3 -port 8082 -path ./tmp -peers "1=localhost:8080,2=localhost:8081"
+go run main.go -id 2 -port 8081 -path ./tmp -shardMap "0=1@localhost:8080,2@localhost:8081,3@localhost:8082"
+go run main.go -id 3 -port 8082 -path ./tmp -shardMap "0=1@localhost:8080,2@localhost:8081,3@localhost:8082"
 ```
 
 *Note that nodes will automatically run elections and agree on a consensus leader.*

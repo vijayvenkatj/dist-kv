@@ -24,7 +24,7 @@ type Config struct {
 
 func NewServer(config Config) *Server {
 
-	shardManager := NewShardManager(config.ShardList, "", config)
+	shardManager := NewShardManager(config.ShardList, config.Address, config)
 	handler := NewHandler(shardManager, config)
 	router := NewRouter(handler)
 

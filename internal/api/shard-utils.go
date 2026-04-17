@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"sort"
 
 	"github.com/vijayvenkatj/kv-store/internal/server/store"
 )
@@ -15,7 +16,8 @@ type Location struct {
 type ShardManager struct {
 	LocalShards  map[uint32]*store.Store // ShardID -> Store
 	GlobalShards map[uint32][]Location   // ShardID -> Location
-	LocalAddr    string
+	ShardIDs     []uint32
+	LocalNodeID  uint32
 
 	Nodes   []uint32
 	NodeMap map[uint32]string // NodeID -> Address
@@ -29,15 +31,25 @@ func NewShardManager(shardList map[uint32][]Location, localAddr string, config C
 	// Make a list of shards to be in our Node
 	var localShardList []uint32
 	for shardID, list := range shardList {
+		isLocalShard := false
 		for _, location := range list {
-			if location.Address == localAddr {
-				localShardList = append(localShardList, shardID)
+			if location.NodeID == config.NodeID {
+				isLocalShard = true
 			}
 
 			nodes = append(nodes, location.NodeID)
 			nodeMap[location.NodeID] = location.Address
 		}
+		if isLocalShard {
+			localShardList = append(localShardList, shardID)
+		}
 	}
+
+	shardIDs := make([]uint32, 0, len(shardList))
+	for shardID := range shardList {
+		shardIDs = append(shardIDs, shardID)
+	}
+	sort.Slice(shardIDs, func(i, j int) bool { return shardIDs[i] < shardIDs[j] })
 
 	// Create Stores for each Shard
 	localShards := make(map[uint32]*store.Store)
@@ -66,7 +78,8 @@ func NewShardManager(shardList map[uint32][]Location, localAddr string, config C
 	return &ShardManager{
 		LocalShards:  localShards,
 		GlobalShards: shardList,
-		LocalAddr:    localAddr,
+		ShardIDs:     shardIDs,
+		LocalNodeID:  config.NodeID,
 
 		Nodes:   nodes,
 		NodeMap: nodeMap,
@@ -93,7 +106,7 @@ HELPERS
 func (sm *ShardManager) ownsShard(shardID uint32) bool {
 	nodes := sm.GlobalShards[shardID]
 	for _, location := range nodes {
-		if location.Address == sm.LocalAddr {
+		if location.NodeID == sm.LocalNodeID {
 			return true
 		}
 	}
@@ -107,6 +120,9 @@ func hash(key string) uint32 {
 }
 
 func (sm *ShardManager) getShardID(key string) uint32 {
-	shardID := hash(key) % uint32(len(sm.LocalShards))
-	return shardID
+	if len(sm.ShardIDs) == 0 {
+		return 0
+	}
+	idx := hash(key) % uint32(len(sm.ShardIDs))
+	return sm.ShardIDs[idx]
 }
