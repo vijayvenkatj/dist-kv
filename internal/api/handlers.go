@@ -4,23 +4,18 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/vijayvenkatj/kv-store/internal/server/store"
 	"github.com/vijayvenkatj/kv-store/internal/server/wal"
 )
 
 type Handler struct {
-	NodeID  uint32
-	Peers   []uint32
-	PeerMap map[uint32]string
-	Store   *store.Store
+	NodeID uint32
+	SM     *ShardManager
 }
 
-func NewHandler(store *store.Store, config Config) *Handler {
+func NewHandler(sm *ShardManager, config Config) *Handler {
 	return &Handler{
-		NodeID:  config.NodeID,
-		Peers:   config.Peers,
-		PeerMap: config.PeerMap,
-		Store:   store,
+		NodeID: config.NodeID,
+		SM:     sm,
 	}
 }
 
@@ -31,7 +26,16 @@ func (handler *Handler) GetValueHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	val, err := handler.Store.Get(key)
+	shardID := handler.SM.getShardID(key)
+	store, err := handler.SM.GetLocalShard(shardID)
+	if err != nil {
+		shardAddr := handler.SM.ShardLocation(shardID).Address
+		url := "http://" + shardAddr + "/api/v1/value"
+		http.Redirect(w, r, url, http.StatusTemporaryRedirect)
+		return
+	}
+
+	val, err := store.Get(key)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, Response{Error: "not found"})
 		return
@@ -52,15 +56,24 @@ func (handler *Handler) PutValueHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if !handler.Store.IsLeader() {
-		leaderID := handler.Store.LeaderId
+	shardID := handler.SM.getShardID(req.Key)
+	store, err := handler.SM.GetLocalShard(shardID)
+	if err != nil {
+		shardAddr := handler.SM.ShardLocation(shardID).Address
+		url := "http://" + shardAddr + "/api/v1/value"
+		http.Redirect(w, r, url, http.StatusTemporaryRedirect)
+		return
+	}
+
+	if !store.IsLeader() {
+		leaderID := store.LeaderId
 
 		if leaderID == 0 {
 			writeJSON(w, 503, Response{Error: "leader unknown"})
 			return
 		}
 
-		url := "http://" + handler.PeerMap[leaderID] + "/api/v1/value"
+		url := "http://" + handler.SM.NodeMap[leaderID] + "/api/v1/value"
 
 		http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 		return
@@ -71,7 +84,7 @@ func (handler *Handler) PutValueHandler(w http.ResponseWriter, r *http.Request) 
 		Key:       req.Key,
 		Value:     req.Value,
 	}
-	if err := handler.Store.Apply(logEntry); err != nil {
+	if err := store.Apply(logEntry); err != nil {
 		writeJSON(w, http.StatusInternalServerError, Response{Error: "internal error"})
 		return
 	}
@@ -88,13 +101,22 @@ func (handler *Handler) DeleteValueHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if !handler.Store.IsLeader() {
-		leaderID := handler.Store.LeaderId
+	shardID := handler.SM.getShardID(key)
+	store, err := handler.SM.GetLocalShard(shardID)
+	if err != nil {
+		shardAddr := handler.SM.ShardLocation(shardID).Address
+		url := "http://" + shardAddr + "/api/v1/value"
+		http.Redirect(w, r, url, http.StatusTemporaryRedirect)
+		return
+	}
+
+	if !store.IsLeader() {
+		leaderID := store.LeaderId
 		if leaderID == 0 {
 			writeJSON(w, 503, Response{Error: "leader unknown"})
 			return
 		}
-		url := "http://" + handler.PeerMap[leaderID] + "/api/v1/value"
+		url := "http://" + handler.SM.NodeMap[leaderID] + "/api/v1/value"
 		http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 		return
 	}
@@ -104,7 +126,7 @@ func (handler *Handler) DeleteValueHandler(w http.ResponseWriter, r *http.Reques
 		Key:       key,
 	}
 
-	if err := handler.Store.Apply(logEntry); err != nil {
+	if err := store.Apply(logEntry); err != nil {
 		writeJSON(w, http.StatusNotFound, Response{Error: "not found"})
 		return
 	}

@@ -78,7 +78,7 @@ func (s *Store) AppendEntries(ctx context.Context, req *raft.AppendEntriesReques
 }
 
 /*
-RequestVote returns a vote if the candidate is at-least as updated as the follower.
+RequestVote returns a	 vote if the candidate is at-least as updated as the follower.
 */
 func (s *Store) RequestVote(ctx context.Context, req *raft.RequestVoteRequest) (*raft.RequestVoteResponse, error) {
 	s.mu.Lock()

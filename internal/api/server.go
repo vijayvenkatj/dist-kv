@@ -5,8 +5,6 @@ import (
 	"log"
 	"net/http"
 	"time"
-
-	"github.com/vijayvenkatj/kv-store/internal/server/store"
 )
 
 type Server struct {
@@ -14,30 +12,20 @@ type Server struct {
 }
 
 type Config struct {
-	Address   string
+	Address     string
 	GrpcAddress string
-	ElectionT time.Duration
+	ElectionT   time.Duration
 
-	NodeID  uint32
-	Peers   []uint32
-	PeerMap map[uint32]string
+	NodeID    uint32
+	ShardList map[uint32][]Location
 
 	Path string
 }
 
 func NewServer(config Config) *Server {
 
-	storeConfig := store.Config{
-		NodeID:    config.NodeID,
-		ElectionT: config.ElectionT,
-		Peers:     config.Peers,
-		PeerMap:   config.PeerMap,
-		Path:      config.Path,
-		GrpcAddress: config.GrpcAddress,
-	}
-
-	storeInstance := store.New(storeConfig)
-	handler := NewHandler(storeInstance, config)
+	shardManager := NewShardManager(config.ShardList, "", config)
+	handler := NewHandler(shardManager, config)
 	router := NewRouter(handler)
 
 	return &Server{
